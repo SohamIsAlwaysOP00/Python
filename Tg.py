@@ -37,11 +37,12 @@ async def run():
                         await client.send_message(d.id, text)
                         print("Sent to:", d.name)
                         count += 1
+                        await asyncio.sleep(4)  # ⏳ 4-second delay between groups
                     except Exception as e:
                         print("Error sending to", d.name, ":", e)
 
             print("Cycle finished. Sent to", count, "groups. Waiting 5 minutes.")
-            await asyncio.sleep(300)
+            await asyncio.sleep(300)  # ⏳ 5-minute delay after full cycle
 
 if __name__ == "__main__":
     asyncio.run(run())
