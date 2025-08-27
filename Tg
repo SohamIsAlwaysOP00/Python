@@ -1,0 +1,47 @@
+from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError
+import asyncio
+
+API_ID = 24828187
+API_HASH = "bfa918b7ef703695a941f78b26a36078"
+SESSION = "forwarder"  # creates forwarder.session
+
+async def run():
+    async with TelegramClient(SESSION, API_ID, API_HASH) as client:
+        if not await client.is_user_authorized():
+            phone = input("Enter phone (with country code, e.g. +11234567890): ").strip()
+            await client.send_code_request(phone)
+            code = input("Enter the login code you received: ").strip()
+            try:
+                await client.sign_in(phone=phone, code=code)
+            except SessionPasswordNeededError:
+                pw = input("Two-step verification is enabled. Enter your password: ").strip()
+                await client.sign_in(password=pw)
+            print("Login successful. Session saved.")
+
+        while True:
+            me = await client.get_me()
+            msgs = await client.get_messages(me, limit=1)
+            if not msgs or not msgs[0].text:
+                print("No text message found in Saved Messages; waiting 5 minutes.")
+                await asyncio.sleep(300)
+                continue
+
+            text = msgs[0].text
+            print("Starting new cycle; sending to all groups.")
+            count = 0
+
+            async for d in client.iter_dialogs():
+                if d.is_group:
+                    try:
+                        await client.send_message(d.id, text)
+                        print("Sent to:", d.name)
+                        count += 1
+                    except Exception as e:
+                        print("Error sending to", d.name, ":", e)
+
+            print("Cycle finished. Sent to", count, "groups. Waiting 5 minutes.")
+            await asyncio.sleep(300)
+
+if __name__ == "__main__":
+    asyncio.run(run())
