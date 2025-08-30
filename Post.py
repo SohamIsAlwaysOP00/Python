@@ -3,12 +3,12 @@ import asyncio
 import re
 
 # 1) Fill in your API credentials
-api_id = 123456  # replace with your API ID (int)
-api_hash = 'your_api_hash'  # replace with your API Hash (string)
+api_id = 24828187‎  # replace with your API ID (int)
+api_hash = 'bfa918b7ef703695a941f78b26a36078'  # replace with your API Hash (string)
 
 # 2) Put the full t.me links for source and target
-source_link = 'https://t.me/source_group_or_channel_link'
-target_link = 'https://t.me/target_group_or_channel_link'
+source_link ='https://t.me/+Wl-5cAqkDOdlZTVl'
+target_link ='https://t.me/+JUNj103Brlg1M2E1'
 
 # Your username with '@' included
 my_username = '@AccSellerTGWP'
